@@ -16,60 +16,96 @@ BASE_URL = "https://www.bahn.de/buchung/reiseuebersicht/vergangene"
 # --- 2. HILFSFUNKTIONEN ---
 
 def handle_cookies(page):
-    try:
-        # Deutsch ODER Englisch
-        cookie_btn = page.get_by_role("button", name="Alle Cookies zulassen")
-        if not cookie_btn.is_visible(timeout=2000):
-            cookie_btn = page.get_by_role("button", name="Allow all cookies")
+    """Versucht Cookie-Popup zu schließen - mehrere Varianten"""
+    closed = False
 
-        if cookie_btn.is_visible(timeout=2000):
-            cookie_btn.click()
+    # Variante 1: Englischer Button (kommt auf dem Screenshot vor!)
+    try:
+        cookie_btn = page.get_by_role("button", name="Allow all cookies")
+        if cookie_btn.is_visible(timeout=1000):
+            cookie_btn.click(force=True)
             page.wait_for_timeout(500)
+            print(f"{ts()} ✅ Cookie-Popup geschlossen (EN)")
+            return True
     except:
         pass
 
-def collect_all_trips(page):
-    """Klappt die Liste vollständig aus und sammelt alle Detail-URLs."""
-    print(f"{ts()} → Suche nach weiteren Reisen...")
-    # WICHTIG: Warte, bis mindestens eine Reise oder der Button wirklich da ist
-    # Wir warten auf den Button ODER einen der Reisedetail-Links
+    # Variante 2: Deutscher Button
     try:
-        page.wait_for_selector("text=Reisedetails", timeout=10000)
+        cookie_btn = page.get_by_role("button", name="Alle Cookies zulassen")
+        if cookie_btn.is_visible(timeout=1000):
+            cookie_btn.click(force=True)
+            page.wait_for_timeout(500)
+            print(f"{ts()} ✅ Cookie-Popup geschlossen (DE)")
+            return True
     except:
-        print(f"{ts()} ⚠️ Weder Reisen noch Lade-Button gefunden.")
+        pass
+
+    # Variante 3: JavaScript Fallback
+    try:
+        js_result = page.evaluate("""
+            () => {
+                const buttons = Array.from(document.querySelectorAll('button'));
+                const cookieBtn = buttons.find(b => {
+                    const text = b.textContent.toLowerCase();
+                    return (text.includes('allow all') || 
+                            text.includes('alle cookies'));
+                });
+                if (cookieBtn) {
+                    cookieBtn.click();
+                    return true;
+                }
+                return false;
+            }
+        """)
+        if js_result:
+            page.wait_for_timeout(500)
+            print(f"{ts()} ✅ Cookie-Popup geschlossen (JS)")
+            return True
+    except:
+        pass
+
+    return False  # Kein Popup gefunden - aber auch kein Error ausgeben
+
+
+def collect_all_trips(page):
+    print(f"{ts()} → Suche nach weiteren Reisen...")
+
+    # 1. EXPLIZIT warten, bis mindestens ein Reise-Link da ist
+    try:
+        page.wait_for_selector("a.test-reisedetails-button-mobile", timeout=10000)
+    except:
+        print(f"{ts()} ⚠️ Keine Reisen initial gefunden. Seite vielleicht noch leer?")
         return []
+
+    # 2. Den Button mit einer kleinen Verzögerung suchen
     klick_count = 0
     while True:
-        btn = page.get_by_text("Weitere Reisen laden")
-        if btn.is_visible(timeout=3000):
-            klick_count += 1
-            print(f"{ts()}   [{klick_count}] Klicke 'Weitere Reisen laden'...")
-            btn.scroll_into_view_if_needed()
+        # Auf dem Mac hilft oft ein kurzes Scrollen, um Lazy Loading zu triggern
+        page.mouse.wheel(0, 500)
+
+        btn = page.get_by_role("button", name="Weitere Reisen laden")
+
+        if btn.is_visible(timeout=2000):
             btn.click()
-            page.wait_for_timeout(500)
+          klick_count += 1
+            print(f"{ts()}   [{klick_count}] Klicke 'Weitere Reisen laden'...")
+            page.wait_for_timeout(1500)  # Mac braucht oft etwas länger zum Rendern
         else:
             break
 
-    print(f"{ts()} ✅ Liste vollständig geladen ({klick_count} Klicks)")
+    # ... restlicher Code
+    print(f"{ts()} ✅ Liste geladen ({klick_count} Klicks)")
 
-    # Jetzt alle Detail-URLs sammeln
-    print(f"{ts()} 📋 Sammle Reise-URLs...")
-    detail_links = page.locator("a.test-reisedetails-button-mobile").all()
-    count = len(detail_links)
-
+    detail_links = page.locator("a.test-reisedetails-button").all()
     detailpages = []
     for link in detail_links:
         href = link.get_attribute("href")
         if href:
-            # Relative URL zu absoluter URL machen
-            full_url = f"https://www.bahn.de{href}"
-            detailpages.append(full_url)
-            print(f"{ts()}{full_url }")
+            detailpages.append(f"https://www.bahn.de{href}")
 
-    print(f"{ts()} ✅ {len(detailpages)} Reise-URLs gesammelt")
-
+    print(f"{ts()} ✅ {len(detailpages)} Reisen gefunden")
     return detailpages
-
 
 def get_download_filename(datum_text, auftrag_text,kundenname):
     monate = {
@@ -251,6 +287,9 @@ def run_download():
             return
 
         # Hauptlogik
+        # # page again?
+        # print(f"{ts()} Reload {BASE_URL}")
+        # page.goto(BASE_URL)
         detail_urls = collect_all_trips(page)
         count = len(detail_urls)
         print(f"{ts()} 📊 {count} Reisen gefunden.")

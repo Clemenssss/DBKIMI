@@ -2,7 +2,6 @@ import sys
 import platform
 import keyring
 from datetime import datetime
-#push changed
 
 def ts(format: object = "[%H:%M:%S]") -> str:
     """Gibt aktuelle Zeit als [HH:MM:SS] String zurück für Logging."""
@@ -123,19 +122,23 @@ def get_credentials(service_name: str = "db_bahn_portal") -> tuple[str, str | No
         response = get_input("Verwenden (Enter) oder neu (n)? ")
         if response.strip().lower() == "":
             password = keyring.get_password(service_name, last_email)
+            print()
             return last_email, password
 
     email = get_input("E-Mail: ")
+    print()
     existing_password = keyring.get_password(service_name, email)
     if existing_password:
         sys.stdout.write(f"Für {email} ist bereits ein Passwort hinterlegt.\n")
         sys.stdout.flush()
         response = get_input("Vorhandenes Passwort verwenden (Enter) oder neues eingeben (n)? ")
+        print()
         if response.strip().lower() == "":
             keyring.set_password(service_name, "last_email", email)
             return email, existing_password
 
     password = get_password("Passwort: ")
+    print()
     keyring.set_password(service_name, email, password)
     keyring.set_password(service_name, "last_email", email)
     return email, password
