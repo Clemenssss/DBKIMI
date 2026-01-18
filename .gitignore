@@ -58,6 +58,7 @@ venv.bak/
 Thumbs.db
 
 # Project specific
+src/rechnungen/
 logs/
 *.log
 *.db
