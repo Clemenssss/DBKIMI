@@ -1,6 +1,7 @@
 #push changed files
 import os
 import time
+import datetime
 import traceback
 from operator import truediv
 
@@ -69,42 +70,55 @@ def handle_cookies(page):
 
 
 def collect_all_trips(page):
-    print(f"{ts()} → Suche nach weiteren Reisen...")
-
-    # 1. EXPLIZIT warten, bis mindestens ein Reise-Link da ist
-    try:
-        page.wait_for_selector("a.test-reisedetails-button-mobile", timeout=10000)
-    except:
-        print(f"{ts()} ⚠️ Keine Reisen initial gefunden. Seite vielleicht noch leer?")
-        return []
-
-    # 2. Den Button mit einer kleinen Verzögerung suchen
-    klick_count = 0
-    while True:
-        # Auf dem Mac hilft oft ein kurzes Scrollen, um Lazy Loading zu triggern
-        page.mouse.wheel(0, 500)
-
-        btn = page.get_by_role("button", name="Weitere Reisen laden")
-
-        if btn.is_visible(timeout=2000):
-            btn.click()
-          klick_count += 1
-            print(f"{ts()}   [{klick_count}] Klicke 'Weitere Reisen laden'...")
-            page.wait_for_timeout(1500)  # Mac braucht oft etwas länger zum Rendern
-        else:
-            break
-
-    # ... restlicher Code
-    print(f"{ts()} ✅ Liste geladen ({klick_count} Klicks)")
-
-    detail_links = page.locator("a.test-reisedetails-button").all()
     detailpages = []
-    for link in detail_links:
-        href = link.get_attribute("href")
-        if href:
-            detailpages.append(f"https://www.bahn.de{href}")
+    print(f"{ts()} 🔍 DEBUG-MODUS gestartet...")
 
-    print(f"{ts()} ✅ {len(detailpages)} Reisen gefunden")
+    try:
+        # 1. WICHTIG: Warte, bis die Seite wirklich Daten zeigt
+        # Wir warten auf den Container oder die Buttons
+        print(f"{ts()} ⏳ Warte auf Bahn-Inhalte (max 10s)...")
+        try:
+            # Warte bis entweder Reisen da sind ODER der "Weitere"-Button erscheint
+            page.wait_for_selector("a.test-reisedetails-button-mobile, button:has-text('Weitere Reisen laden')",
+                                   timeout=10000)
+        except:
+            print(f"{ts()} ⚠️ Timeout: Seite scheint auch nach 10s leer zu sein.")
+            page.screenshot(path="debug_timeout_empty.png")
+            return []
+
+        # 2. Kurze Verschnaufpause für das Rendering
+        page.wait_for_timeout(1000)
+
+        # --- Ab hier dein Klick-Loop ---
+        klick_count = 0
+        while True:
+            # Wir suchen den Button jetzt spezifischer
+            btn = page.get_by_role("button", name="Weitere Reisen laden")
+            if btn.is_visible():
+                btn.scroll_into_view_if_needed()
+                btn.click()
+                klick_count += 1
+                print(f"{ts()}   [{klick_count}] Klick 'Weitere Reisen'...")
+                page.wait_for_timeout(2000)  # Zeit zum Nachladen geben
+            else:
+                break
+
+        # 3. Jetzt erst sammeln
+        links = page.locator("a.test-reisedetails-button-mobile").all()
+        for link in links:
+            href = link.get_attribute("href")
+            if href:
+                detailpages.append(f"https://www.bahn.de{href}" if href.startswith("/") else href)
+
+        detailpages = list(dict.fromkeys(detailpages))
+        print(f"{ts()} ✅ {len(detailpages)} Reisen erfolgreich im Speicher.")
+
+    except Exception as e:
+        print(f"{ts()} 🔥 Fehler: {e}")
+    finally:
+        print(f"{ts()} 🔒 Cleanup: Schließe Browser-Kontext...")
+        page.context.close()
+
     return detailpages
 
 def get_download_filename(datum_text, auftrag_text,kundenname):
