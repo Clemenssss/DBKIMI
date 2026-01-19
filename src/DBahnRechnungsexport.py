@@ -1,9 +1,9 @@
 #push changed files
 import os
 import time
-import datetime
-import traceback
-from operator import truediv
+# import datetime
+# import traceback
+# from operator import truediv
 
 from playwright.sync_api import sync_playwright, TimeoutError
 from reusables import get_credentials, ts
@@ -69,55 +69,80 @@ def handle_cookies(page):
     return False  # Kein Popup gefunden - aber auch kein Error ausgeben
 
 
+def load_all_reisen(page):
+    print(f"{ts()} 🔄 Starte Nachladen der Liste...")
+    klick_limit = 15
+    klicks = 0
+
+    while klicks < klick_limit:
+        # 1. Ans Ende der Seite scrollen, damit der Button geladen wird
+        page.keyboard.press("End")
+        page.wait_for_timeout(1500)  # Zeit für die Bahn-Seite zu reagieren
+
+        # 2. Den Button suchen
+        # Wir versuchen es mit einer Kombination aus Text und Rolle
+        loader_btn = page.get_by_role("button").filter(has_text="Weitere Reisen laden")
+
+        # 3. Prüfen, ob er da ist (wir warten hier kurz explizit)
+        if loader_btn.count() > 0 and loader_btn.is_visible():
+            print(f"{ts()}   🔘 Klick {klicks + 1}: Lade mehr...")
+            loader_btn.scroll_into_view_if_needed()
+            loader_btn.click(force=True)
+
+            # Warten, bis der Lade-Indicator (aus deinem Screenshot) weg ist
+            page.wait_for_timeout(1000)
+            klicks += 1
+        else:
+            # Sicherheits-Check: Nochmal scrollen, falls er erst jetzt erscheint
+            page.keyboard.press("End")
+            page.wait_for_timeout(1000)
+            if loader_btn.count() == 0:
+                print(f"{ts()} ✅ Keine weiteren 'Laden'-Buttons gefunden.")
+                break
+            klicks += 1  # Falls er doch noch da ist, nächster Durchlauf
+
 def collect_all_trips(page):
+    #gemnini 20260119
     detailpages = []
-    print(f"{ts()} 🔍 DEBUG-MODUS gestartet...")
+    print(f"{ts()} 🔍 Starte Extraktion (Hypothese: Attribut-Selektor ist stabiler)...")
 
     try:
-        # 1. WICHTIG: Warte, bis die Seite wirklich Daten zeigt
-        # Wir warten auf den Container oder die Buttons
-        print(f"{ts()} ⏳ Warte auf Bahn-Inhalte (max 10s)...")
-        try:
-            # Warte bis entweder Reisen da sind ODER der "Weitere"-Button erscheint
-            page.wait_for_selector("a.test-reisedetails-button-mobile, button:has-text('Weitere Reisen laden')",
-                                   timeout=10000)
-        except:
-            print(f"{ts()} ⚠️ Timeout: Seite scheint auch nach 10s leer zu sein.")
-            page.screenshot(path="debug_timeout_empty.png")
-            return []
+        # Kurze Pause, falls Vue.js noch mit dem DOM-Tree beschäftigt ist
+        page.wait_for_timeout(2000)
+        load_all_reisen(page)
+        # Wir suchen nach dem Muster, das wir in deinem Screenshot identifiziert haben
+        selector = "a[href*='auftragsnummer=']"
 
-        # 2. Kurze Verschnaufpause für das Rendering
-        page.wait_for_timeout(1000)
+        # Wir warten darauf, dass dieser spezifische Link-Typ erscheint
+        print(f"{ts()} ⏳ Suche nach Links mit 'auftragsnummer='...")
+        page.wait_for_selector(selector, timeout=12000)
 
-        # --- Ab hier dein Klick-Loop ---
-        klick_count = 0
-        while True:
-            # Wir suchen den Button jetzt spezifischer
-            btn = page.get_by_role("button", name="Weitere Reisen laden")
-            if btn.is_visible():
-                btn.scroll_into_view_if_needed()
-                btn.click()
-                klick_count += 1
-                print(f"{ts()}   [{klick_count}] Klick 'Weitere Reisen'...")
-                page.wait_for_timeout(2000)  # Zeit zum Nachladen geben
-            else:
-                break
+        links_locator = page.locator(selector)
+        count = links_locator.count()
 
-        # 3. Jetzt erst sammeln
-        links = page.locator("a.test-reisedetails-button-mobile").all()
-        for link in links:
-            href = link.get_attribute("href")
+        if count == 0:
+            print(f"{ts()} ⚠️ Trotz Wartezeit wurden 0 Links mit diesem Muster gefunden.")
+            page.screenshot(path="debug_keine_auftragsnummer.png")
+        else:
+            print(f"{ts()} 📊 {count} potenzielle Reise-Links identifiziert.")
+
+        for i in range(count):
+            href = links_locator.nth(i).get_attribute("href")
             if href:
-                detailpages.append(f"https://www.bahn.de{href}" if href.startswith("/") else href)
+                full_url = f"https://www.bahn.de{href}" if href.startswith("/") else href
+                detailpages.append(full_url)
 
         detailpages = list(dict.fromkeys(detailpages))
-        print(f"{ts()} ✅ {len(detailpages)} Reisen erfolgreich im Speicher.")
 
     except Exception as e:
-        print(f"{ts()} 🔥 Fehler: {e}")
+        print(f"{ts()} 🔥 Fehler bei der Extraktion: {e}")
+        page.screenshot(path="debug_exception.png")
+
     finally:
-        print(f"{ts()} 🔒 Cleanup: Schließe Browser-Kontext...")
-        page.context.close()
+        # Der Cleanup-Block, der (wie wir gelernt haben) auch beim Return greift
+        # print(f"{ts()} 🔒 Cleanup: Schließe Browser-Kontext...")
+        # page.context.close()
+        pass
 
     return detailpages
 
@@ -196,95 +221,98 @@ def login_to_bahn(page, email, password):
 def process_single_trip(page, url, index, total, stellen, stats):
     try:
         print(f"{ts()} 📍 {index + 1}/{total}: Details")
-        # 1. Navigation und Daten auslesen
-        try:
-            page.goto(url, wait_until="networkidle", timeout=10000)
-        except:
-            # Falls die Seite gar nicht lädt (Internet/Server-Fehler)
-            print(f"{ts()}    ⚠️ Verbindung hakt, versuche Reload...")
-            page.wait_for_timeout(2000)
-            page.goto(url, wait_until="domcontentloaded", timeout=60000)
-#        page.wait_for_selector(".test-auftragsnummer", timeout=30000)
-        # Erst sicherstellen, dass das Element nicht nur da ist, sondern auch Text enthält
-        page.locator(".test-auftragsnummer").wait_for(state="visible", timeout=60000)
 
-        # Falls das Element leer ist, kurz warten (asynchrones Nachladen)
-        if not page.locator(".test-auftragsnummer").inner_text().strip():
-            page.wait_for_timeout(2000)
-        auftrag = page.locator(".test-auftragsnummer").inner_text().strip()
+        # 1. Schnelleres Laden: "domcontentloaded" reicht meistens aus
+        try:
+            # Wir warten nicht mehr auf 'networkidle', das dauert bei der Bahn zu lange
+            page.goto(url, wait_until="domcontentloaded", timeout=20000)
+        except Exception:
+            print(f"{ts()}    ⚠️ Timeout beim Laden, versuche direkten Zugriff...")
+            page.goto(url, wait_until="commit", timeout=30000)
+
+        # 2. Warten auf Kerndaten
+        auftrag_locator = page.locator(".test-auftragsnummer")
+        auftrag_locator.wait_for(state="attached", timeout=90000)
+
+        # Schneller Check ob Text da ist, sonst Mini-Pause
+        if not auftrag_locator.inner_text().strip():
+            page.wait_for_timeout(1000)
+
+        auftrag = auftrag_locator.inner_text().strip()
         datum_raw = page.locator(".test-anlagedatum").inner_text().strip()
         kundenname = page.locator(".test-kundenname").inner_text().strip()
 
-        # Dateinamen erstellen
+        # Dateiname und Existenz-Check
         lfd_nummer = str(index + 1).zfill(stellen)
         filename = get_download_filename(datum_raw, auftrag, kundenname).replace("RG", f"RG_{lfd_nummer}", 1)
         filepath = os.path.join(DOWNLOAD_DIR, filename)
-        print(f"{ts()} 📍 {index + 1}/{total}: Download steht an: {filename}")
 
         if os.path.exists(filepath):
             print(f"{ts()} ⏭️  {index + 1}/{total}: Bereits vorhanden: {filename}")
             stats["vorhanden"] += 1
             return True
 
-        # 2. Seite verifizieren
-        page.locator(".test-breadcrumb-item-text-only", has_text="Reisedetails").wait_for(state="visible", timeout=15000)
+        print(f"{ts()} 📍 {index + 1}/{total}: Download {filename} vorbereiten...")
 
-        # 3. Locatoren definieren (Role-basiert ist am sichersten!)
-        create_btn = page.locator("button.rechnung-abruf__create-rechnung-button").first
-        download_btn = page.get_by_role("button", name="Rechnung als PDF herunterladen")
+        # 3. Download-Logik mit priorisiertem JS-Klick
+        # Wir definieren eine Funktion für den Klick, um Code-Duplikate zu vermeiden
+        def trigger_download():
+            page.evaluate("""() => {
+                // Wir nutzen Array.find, um den Button am Text zu erkennen
+                const buttons = Array.from(document.querySelectorAll('button'));
+                const btn = buttons.find(b => 
+                    b.innerText.includes('Rechnung') || 
+                    b.classList.contains('rechnung-abruf__create-rechnung-button')
+                );
+                if (btn) {
+                    btn.click();
+                    return true;
+                }
+                return false;
+            }""")
 
-        # 4. Scrollen
+        # 4. Falls Button "Rechnung erstellen" da ist
+        create_btn = page.locator("button.rechnung-abruf__create-rechnung-button")
+        if create_btn.is_visible(timeout=2000):
+            print(f"{ts()}    ⚙️  Rechnung wird angefordert...")
+            trigger_download()
+            page.wait_for_timeout(3000)  # Zeit für Generierung
+
+        # 5. Der eigentliche Download-Klick
         try:
-            if download_btn.is_visible():
-                download_btn.scroll_into_view_if_needed(timeout=2000)
-            else:
-                create_btn.scroll_into_view_if_needed(timeout=2000)
-        except:
-            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-
-        # 5. Rechnung erstellen falls nötig
-        if create_btn.is_visible(timeout=3000):
-            print(f"{ts()}    ⚙️  Rechnung wird erstellt (Server-Request)...")
-            create_btn.click()
-            try:
-                download_btn.wait_for(state="visible", timeout=30000)
-                print(f"{ts()}    ✅ Rechnung wird generiert.")
-            except:
-                print(f"{ts()}    ⚠️ Rechnung wurde nicht rechtzeitig generiert.")
-                return False
-
-        # 6. Der eigentliche Download (jetzt mit Force-Click und JS-Backup)
-        try:
-            download_btn.wait_for(state="visible", timeout=15000)
-            page.wait_for_load_state("networkidle")
-
-            with page.expect_download(timeout=30000) as download_info:
-                # Force=True hilft gegen Overlays, die den Klick blockieren
-                download_btn.click(force=True, timeout=15000)
+            with page.expect_download(timeout=20000) as download_info:
+                # Wir versuchen erst den "sauberen" Klick, falls das Element bereit ist
+                download_btn = page.get_by_role("button", name="Rechnung als PDF herunterladen")
+                if download_btn.is_visible():
+                    print(f"{ts()} 📍 download_btn.is_visible...")
+                    download_btn.click(force=True, timeout=5000)
+                else:
+                    # Sofortiger JS-Backup-Klick
+                    print(f"{ts()} 📍 trigger_download()")
+                    trigger_download()
 
             download = download_info.value
             download.save_as(filepath)
-            print(f"{ts()}    ✓ Erfolg.")
-            stats["neu"] += 1
+            # Prüfung, ob die Datei erfolgreich geschrieben wurde
+            if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
+                print(f"{ts()}    ✓ Erfolg: Datei gespeichert unter '{filepath}'.")
+                stats["neu"] += 1
+            else:
+                print(f"{ts()}    ✗ Fehler: Datei konnte nicht gespeichert werden.")
             return True
 
         except Exception as e:
-            print(f"{ts()}    ⚠️ Normaler Klick fehlgeschlagen, versuche JS-Klick...")
-            try:
-                with page.expect_download(timeout=20000) as download_info:
-                    # Wir klicken den Button direkt via JavaScript
-                    page.evaluate("() => { const b = Array.from(document.querySelectorAll('button')).find(el => el.textContent.includes('Rechnung als PDF')); if(b) b.click(); }")
-                download = download_info.value
-                download.save_as(filepath)
-                print(f"{ts()}    ✓ Erfolg (via JS-Klick).")
-                stats["neu"] += 1
-                return True
-            except:
-                raise e # Reicht den Fehler an den äußeren Block weiter
+            # Letzter Rettungsversuch: Nochmal JS-Klick falls Timeout
+            print(f"{ts()}    ⚠️ Timeout beim Download-Event, starte JS-Retry...")
+            with page.expect_download(timeout=10000) as download_info:
+                trigger_download()
+            download = download_info.value
+            download.save_as(filepath)
+            stats["neu"] += 1
+            return True
 
     except Exception as e:
         print(f"{ts()}    ✗ Fehler bei Reise {index + 1}: {e}")
-        print(f"{ts()}    → URL für manuelle Nacharbeit: {url}")
         stats["fehler"] += 1
         return False
 def run_download():
@@ -311,24 +339,26 @@ def run_download():
         os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
         stellen = len(str(count))  # Gibt 2 bei 52 Reisen, 3 bei 100+
-
-        for i, url in enumerate(detail_urls):
-            success = process_single_trip(page, url, i, count, stellen, stats)
-
-            # # Rate Limiting: Pause nach jedem 3. Download
-            # if (i + 1) % 3 == 0 and (i + 1) < count:
-            #     print(f"{ts()}   ⏸️  Pause (Server-Schonung)...")
-            #     page.wait_for_timeout(5000)
-
-            # Bei Fehler: Optional zur Übersicht zurück und neu sammeln
-            if not success:
-                print(f"{ts()}   ⚠️  Versuche Neustart...")
-                page.goto(BASE_URL)
-                page.wait_for_timeout(300)  # Extra Pause nach Fehler
+        toDoUrls = detail_urls
+        trys = 0.
+        maxtrys = 5.
+        while len(toDoUrls) > 0 and trys < maxtrys:
+            process_urls(count, toDoUrls, page, stats, stellen)
+            trys+=1
 
         print(f"{ts()}\n--- BERICHT: Neu: {stats['neu']} | Vorhanden: {stats['vorhanden']} | Fehler: {stats['fehler']} ---")
         browser.close()
 
+
+def process_urls(count: int, detail_urls: list, page, stats: dict[str, int], stellen: int):
+    unprocessed = []
+    print(f"{ts()} Download {len(detail_urls)} Reisen")
+    for i, url in enumerate(detail_urls):
+        success = process_single_trip(page, url, i, count, stellen, stats)
+        if not success:
+            unprocessed.append(url)
+            print(f"{ts()}   ⚠️  Verarbeite {len(unprocessed)} später {url}...")
+    return unprocessed
 
 if __name__ == "__main__":
     run_download()
