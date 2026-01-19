@@ -343,7 +343,7 @@ def run_download():
         trys = 0.
         maxtrys = 5.
         while len(toDoUrls) > 0 and trys < maxtrys:
-            process_urls(count, toDoUrls, page, stats, stellen)
+            toDoUrls = process_urls(count, toDoUrls, page, stats, stellen)
             trys+=1
 
         print(f"{ts()}\n--- BERICHT: Neu: {stats['neu']} | Vorhanden: {stats['vorhanden']} | Fehler: {stats['fehler']} ---")
