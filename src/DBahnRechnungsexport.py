@@ -284,21 +284,12 @@ def process_single_trip(page, url, index, total, stellen, stats):
                 # Wir versuchen erst den "sauberen" Klick, falls das Element bereit ist
                 download_btn = page.get_by_role("button", name="Rechnung als PDF herunterladen")
                 if download_btn.is_visible():
-                    print(f"{ts()} 📍 download_btn.is_visible...")
-                    download_btn.click(force=True, timeout=5000)
+                    download_btn.click(force=True, timeout=500)
                 else:
                     # Sofortiger JS-Backup-Klick
-                    print(f"{ts()} 📍 trigger_download()")
                     trigger_download()
 
-            download = download_info.value
-            download.save_as(filepath)
-            # Prüfung, ob die Datei erfolgreich geschrieben wurde
-            if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
-                print(f"{ts()}    ✓ Erfolg: Datei gespeichert unter '{filepath}'.")
-                stats["neu"] += 1
-            else:
-                print(f"{ts()}    ✗ Fehler: Datei konnte nicht gespeichert werden.")
+            download_save(download_info, filepath, stats)
             return True
 
         except Exception as e:
@@ -306,15 +297,26 @@ def process_single_trip(page, url, index, total, stellen, stats):
             print(f"{ts()}    ⚠️ Timeout beim Download-Event, starte JS-Retry...")
             with page.expect_download(timeout=10000) as download_info:
                 trigger_download()
-            download = download_info.value
-            download.save_as(filepath)
-            stats["neu"] += 1
+            download_save(download_info, filepath, stats)
             return True
 
     except Exception as e:
         print(f"{ts()}    ✗ Fehler bei Reise {index + 1}: {e}")
         stats["fehler"] += 1
         return False
+
+
+def download_save(download_info, filepath: str, stats):
+    download = download_info.value
+    download.save_as(filepath)
+    # Prüfung, ob die Datei erfolgreich geschrieben wurde
+    if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
+        print(f"{ts()}    ✓ Erfolg: Datei gespeichert unter '{filepath}'.")
+        stats["neu"] += 1
+    else:
+        print(f"{ts()}    ✗ Fehler: Datei konnte nicht gespeichert werden.")
+
+
 def run_download():
     email, password = get_credentials(SERVICE_NAME)
     stats = {"neu": 0, "vorhanden": 0, "fehler": 0}
