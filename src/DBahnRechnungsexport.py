@@ -71,86 +71,65 @@ def handle_cookies(page):
 
 
 def load_all_reisen(page):
-    print(f"{ts()} 🔄 Starte Nachladen der Liste...")
+    print(f"{ts()} ▶ Starte Nachladen der Liste...")
     klick_limit = 25
     klicks = 0
-
     while klicks < klick_limit:
-        handle_cookies(page)  # ← vor jedem Scroll-Versuch
-
-        # 1. Ans Ende der Seite scrollen, damit der Button geladen wird
+        handle_cookies(page)
         page.keyboard.press("End")
-        page.wait_for_timeout(1500)  # Zeit für die Bahn-Seite zu reagieren
-
-        # 2. Den Button suchen
-        # Wir versuchen es mit einer Kombination aus Text und Rolle
+        page.wait_for_timeout(1500)
         loader_btn = page.get_by_role("button").filter(has_text="Weitere Reisen laden")
-
-        # 3. Prüfen, ob er da ist (wir warten hier kurz explizit)
         if loader_btn.count() > 0 and loader_btn.is_visible():
-            print(f"{ts()}   🔘 Klick {klicks + 1}: Lade mehr...")
+            print(f"{ts()}   🔄 Klick {klicks + 1}: Lade mehr...")
             loader_btn.scroll_into_view_if_needed()
             loader_btn.click(force=True)
-
-            # Warten, bis der Lade-Indicator (aus deinem Screenshot) weg ist
             page.wait_for_timeout(1000)
             klicks += 1
         else:
-            # Sicherheits-Check: Nochmal scrollen, falls er erst jetzt erscheint
             page.keyboard.press("End")
             page.wait_for_timeout(1000)
             if loader_btn.count() == 0:
                 print(f"{ts()} ✅ Keine weiteren 'Laden'-Buttons gefunden.")
+                # Zurück nach oben scrollen, damit Vue den ersten Eintrag rendert
+                page.evaluate("() => window.scrollTo(0, 0)")
+                page.wait_for_timeout(1000)
                 break
-            klicks += 1  # Falls er doch noch da ist, nächster Durchlauf
+            klicks += 1
 
+    return
 def collect_all_trips(page):
-    #gemnini 20260119
     detailpages = []
-    print(f"{ts()} 🔍 Starte Extraktion (Hypothese: Attribut-Selektor ist stabiler)...")
-
+    print(f"{ts()} ▶ Starte Extraktion...")
     try:
-        # Kurze Pause, falls Vue.js noch mit dem DOM-Tree beschäftigt ist
         page.wait_for_timeout(2000)
         load_all_reisen(page)
-        # Wir suchen nach dem Muster, das wir in deinem Screenshot identifiziert haben
-        selector = "a[href*='auftragsnummer=']"
 
-        # Wir warten darauf, dass dieser spezifische Link-Typ erscheint
-        print(f"{ts()} ⏳ Suche nach Links mit 'auftragsnummer='...")
+        page.wait_for_timeout(2000)
+
+        selector = "a[href*='auftragsnummer=']"
         page.wait_for_selector(selector, timeout=12000)
 
-        links_locator = page.locator(selector)
-        count = links_locator.count()
+        hrefs = page.evaluate("""
+            () => [...document.querySelectorAll("a[href*='auftragsnummer=']")]
+                  .map(a => a.href)
+        """)
 
+        detailpages = list(dict.fromkeys(hrefs))
+
+        count = len(detailpages)
         if count == 0:
-            print(f"{ts()} ⚠️ Trotz Wartezeit wurden 0 Links mit diesem Muster gefunden.")
+            print(f"{ts()} ⚠️ Keine Links gefunden.")
             page.screenshot(path="debug_keine_auftragsnummer.png")
         else:
-            print(f"{ts()} 📊 {count} potenzielle Reise-Links identifiziert.")
-
-        for i in range(count):
-            href = links_locator.nth(i).get_attribute("href")
-            if href:
-                full_url = f"https://www.bahn.de{href}" if href.startswith("/") else href
-                detailpages.append(full_url)
-                print(i,':',full_url
-                      )
-
-        detailpages = list(dict.fromkeys(detailpages))
+            print(f"{ts()} ✅ {count} Reise-Links gefunden:")
+            for i, url in enumerate(detailpages):
+                print(i, ':', url)
 
     except Exception as e:
-        print(f"{ts()} 🔥 Fehler bei der Extraktion: {e}")
+        print(f"{ts()} ❌ Fehler bei der Extraktion: {e}")
         page.screenshot(path="debug_exception.png")
 
-    finally:
-        # Der Cleanup-Block, der (wie wir gelernt haben) auch beim Return greift
-        # print(f"{ts()} 🔒 Cleanup: Schließe Browser-Kontext...")
-        # page.context.close()
-        pass
-
     return detailpages
-
 def get_download_filename(datum_text, auftrag_text,kundenname):
     monate = {
         "Jan": "01", "Feb": "02", "Mär": "03", "Mrz": "03",
