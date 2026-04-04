@@ -1,3 +1,4 @@
+
 #push changed files
 import os
 import time
@@ -71,10 +72,12 @@ def handle_cookies(page):
 
 def load_all_reisen(page):
     print(f"{ts()} 🔄 Starte Nachladen der Liste...")
-    klick_limit = 15
+    klick_limit = 25
     klicks = 0
 
     while klicks < klick_limit:
+        handle_cookies(page)  # ← vor jedem Scroll-Versuch
+
         # 1. Ans Ende der Seite scrollen, damit der Button geladen wird
         page.keyboard.press("End")
         page.wait_for_timeout(1500)  # Zeit für die Bahn-Seite zu reagieren
@@ -131,6 +134,8 @@ def collect_all_trips(page):
             if href:
                 full_url = f"https://www.bahn.de{href}" if href.startswith("/") else href
                 detailpages.append(full_url)
+                print(i,':',full_url
+                      )
 
         detailpages = list(dict.fromkeys(detailpages))
 
@@ -257,6 +262,10 @@ def process_single_trip(page, url, index, total, stellen, stats):
         # 3. Download-Logik mit priorisiertem JS-Klick
         # Wir definieren eine Funktion für den Klick, um Code-Duplikate zu vermeiden
         def trigger_download():
+            # 1. Ans Ende der Seite scrollen, damit der Button geladen wird
+            page.keyboard.press("End")
+            page.wait_for_timeout(1500)  # Zeit für die Bahn-Seite zu reagieren
+
             page.evaluate("""() => {
                 // Wir nutzen Array.find, um den Button am Text zu erkennen
                 const buttons = Array.from(document.querySelectorAll('button'));
@@ -308,14 +317,33 @@ def process_single_trip(page, url, index, total, stellen, stats):
 
 def download_save(download_info, filepath: str, stats):
     download = download_info.value
+
+    # Originaldateiname von der Bahn, z.B. "DB_Rechnung_607227512704.pdf"
+    original_name = download.suggested_filename
+
+    # Rechnungsnummer extrahieren: "607227512704"
+    # aus "DB_Rechnung_607227512704.pdf"
+    rechnungsnr = ""
+    try:
+        stem = os.path.splitext(original_name)[0]  # "DB_Rechnung_607227512704"
+        rechnungsnr = stem.split("_")[-1]  # "607227512704"
+    except:
+        pass
+
+    # Deinen Dateinamen um die Rechnungsnummer erweitern
+    # Aus "RG_01_2024-706855677982_2024-10-31MusterMax.pdf"
+    # wird "RG_01_2024-706855677982_2024-10-31MusterMax_607227512704.pdf"
+    if rechnungsnr:
+        base, ext = os.path.splitext(filepath)
+        filepath = f"{base}_{rechnungsnr}{ext}"
+
     download.save_as(filepath)
-    # Prüfung, ob die Datei erfolgreich geschrieben wurde
+
     if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
-        print(f"{ts()}    ✓ Erfolg: Datei gespeichert unter '{filepath}'.")
+        print(f"{ts()}    ✓ Erfolg: '{os.path.basename(filepath)}'")
         stats["neu"] += 1
     else:
         print(f"{ts()}    ✗ Fehler: Datei konnte nicht gespeichert werden.")
-
 
 def run_download():
     email, password = get_credentials(SERVICE_NAME)
@@ -323,7 +351,15 @@ def run_download():
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=False, slow_mo=500)
-        context = browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0")
+        #context = browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0")
+        context = browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0",
+            locale="de-DE",  # Browser-Locale auf Deutsch
+            extra_http_headers={
+                "Accept-Language": "de-DE,de;q=0.9"  # HTTP-Header erzwingt deutsche Seite
+            }
+        )
+
         page = context.new_page()
 
         if not login_to_bahn(page, email, password):
