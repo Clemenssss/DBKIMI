@@ -26,7 +26,8 @@ def get_input(prompt: str) -> str:
     root = tk.Tk()
     root.withdraw()  # Hauptfenster verstecken
     root.attributes("-topmost", True)  # Dialog im Vordergrund anzeigen
-    return simpledialog.askstring("Eingabe erforderlich", prompt) or ""def get_password(prompt: str) -> str:
+    return simpledialog.askstring("Eingabe erforderlich", prompt) or ""
+def get_password(prompt: str) -> str:
     """Plattformübergreifende Passwort-Eingabe mit Maskierung."""
     sys.stdout.write(prompt)
     sys.stdout.flush()
