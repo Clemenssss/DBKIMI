@@ -14,55 +14,19 @@ else:
     import termios
     import tty
 
+import sys
+import tkinter as tk
+from tkinter import simpledialog
+
+import tkinter as tk
+from tkinter import simpledialog
+
 def get_input(prompt: str) -> str:
-    """Plattformübergreifende Eingabe ohne Cursor-Probleme."""
-    sys.stdout.write(prompt)
-    sys.stdout.flush()
-
-    if platform.system() == "Windows":
-        # Windows: msvcrt
-        input_buffer = []
-        while True:
-            char = msvcrt.getch().decode('utf-8')
-            if char == '\r':  # Enter-Taste
-                sys.stdout.write('\n')
-                sys.stdout.flush()
-                return ''.join(input_buffer)
-            elif char == '\x08':  # Backspace
-                if input_buffer:
-                    input_buffer.pop()
-                    sys.stdout.write('\b \b')
-                    sys.stdout.flush()
-            else:
-                input_buffer.append(char)
-                sys.stdout.write(char)
-                sys.stdout.flush()
-    else:
-        # Linux/macOS: termios
-        fd = sys.stdin.fileno()
-        old_settings = termios.tcgetattr(fd)
-        try:
-            tty.setraw(fd)
-            input_buffer = []
-            while True:
-                char = sys.stdin.read(1)
-                if char == '\r':  # Enter-Taste
-                    sys.stdout.write('\n')
-                    sys.stdout.flush()
-                    return ''.join(input_buffer)
-                elif char == '\x08':  # Backspace
-                    if input_buffer:
-                        input_buffer.pop()
-                        sys.stdout.write('\b \b')
-                        sys.stdout.flush()
-                else:
-                    input_buffer.append(char)
-                    sys.stdout.write(char)
-                    sys.stdout.flush()
-        finally:
-            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-
-def get_password(prompt: str) -> str:
+    """Plattformunabhängige Eingabe mit tkinter (funktioniert in .exe und Konsole)."""
+    root = tk.Tk()
+    root.withdraw()  # Hauptfenster verstecken
+    root.attributes("-topmost", True)  # Dialog im Vordergrund anzeigen
+    return simpledialog.askstring("Eingabe erforderlich", prompt) or ""def get_password(prompt: str) -> str:
     """Plattformübergreifende Passwort-Eingabe mit Maskierung."""
     sys.stdout.write(prompt)
     sys.stdout.flush()
