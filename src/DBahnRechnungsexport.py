@@ -74,23 +74,43 @@ def load_all_reisen(page):
     print(f"{ts()} ▶ Starte Nachladen der Liste...")
     klick_limit = 25
     klicks = 0
+
+    # Selektoren in Prioritätsreihenfolge
+    SELEKTOREN = [
+        "button:has(.test-button-label:text('Weitere Reisen laden'))",
+        "button:has(span:text('Weitere Reisen laden'))",
+        ".test-button-label:text('Weitere Reisen laden')",
+        "span.test-button-label >> text=Weitere Reisen laden",
+    ]
+
+    def finde_button():
+        for sel in SELEKTOREN:
+            try:
+                el = page.locator(sel).first
+                if el.count() > 0 and el.is_visible(timeout=500):
+                    return el
+            except Exception:
+                continue
+        return None
+
     while klicks < klick_limit:
         handle_cookies(page)
         page.keyboard.press("End")
         page.wait_for_timeout(1500)
-        loader_btn = page.get_by_role("button").filter(has_text="Weitere Reisen laden")
-        if loader_btn.count() > 0 and loader_btn.is_visible():
-            print(f"{ts()}   🔄 Klick {klicks + 1}: Lade mehr...")
-            loader_btn.scroll_into_view_if_needed()
-            loader_btn.click(force=True)
-            page.wait_for_timeout(1000)
+
+        btn = finde_button()
+        if btn:
+            print(f"{ts()}   ↓ Klick {klicks + 1}: Lade mehr...")
+            btn.scroll_into_view_if_needed()
+            btn.click(force=True)
+            page.wait_for_timeout(1500)
             klicks += 1
         else:
             page.keyboard.press("End")
             page.wait_for_timeout(1000)
-            if loader_btn.count() == 0:
-                print(f"{ts()} ✅ Keine weiteren 'Laden'-Buttons gefunden.")
-                # Zurück nach oben scrollen, damit Vue den ersten Eintrag rendert
+            btn2 = finde_button()
+            if btn2 is None:
+                print(f"{ts()} ✓ Keine weiteren 'Laden'-Buttons gefunden.")
                 page.evaluate("() => window.scrollTo(0, 0)")
                 page.wait_for_timeout(1000)
                 break
@@ -177,28 +197,34 @@ def get_download_filename(datum_text, auftrag_text,kundenname):
 
 
 def login_to_bahn(page, email, password):
-    print(f"{ts()} → Öffne {BASE_URL}...")
+    print(f"{ts()} ? Öffne {BASE_URL}...")
     page.goto(BASE_URL)
     handle_cookies(page)
     try:
-        page.wait_for_selector("input#username", timeout=15000)
-        page.locator("input#username").fill(email)
+        # Robuster Selektor über name-Attribut (nicht die dynamische ID)
+        page.wait_for_selector('input[name="username"]', timeout=15000)
+        page.locator('input[name="username"]').fill(email)
         page.keyboard.press("Enter")
         page.wait_for_timeout(500)
         handle_cookies(page)
-        page.wait_for_selector("input#password", timeout=10000)
-        page.locator("input#password").fill(password)
+
+        # Auch Passwort-Feld über name-Attribut ansprechen
+        page.wait_for_selector('input[name="password"]', timeout=10000)
+        page.locator('input[name="password"]').fill(password)
         page.keyboard.press("Enter")
         page.wait_for_timeout(500)
         handle_cookies(page)
+
         if page.locator("text=Es ist ein Fehler aufgetreten").first.is_visible(timeout=2000):
             page.goto(BASE_URL)
             handle_cookies(page)
+
         page.wait_for_url("**/vergangene**", timeout=20000)
-        print(f"{ts()} ✅ Login erfolgreich.")
+        print(f"{ts()} ? Login erfolgreich.")
         return True
+
     except Exception as e:
-        print(f"{ts()} ❌ Login-Fehler: {e}")
+        print(f"{ts()} ? Login-Fehler: {e}")
         return False
 
 
