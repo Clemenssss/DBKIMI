@@ -385,23 +385,32 @@ def run_download():
         toDoUrls = detail_urls
         trys = 0.
         maxtrys = 5.
-        while len(toDoUrls) > 0 and trys < maxtrys:
-            toDoUrls = process_urls(count, toDoUrls, page, stats, stellen)
-            trys+=1
+        indices = list(range(len(toDoUrls)))  # einmalig am Anfang
 
+        while len(toDoUrls) > 0 and trys < maxtrys:
+            toDoUrls, indices = process_urls(count, toDoUrls, page, stats, stellen, indices)
+            trys += 1
         print(f"{ts()}\n--- BERICHT: Neu: {stats['neu']} | Vorhanden: {stats['vorhanden']} | Fehler: {stats['fehler']} ---")
         browser.close()
 
 
-def process_urls(count: int, detail_urls: list, page, stats: dict[str, int], stellen: int):
-    unprocessed = []
+def process_urls(count: int, detail_urls: list, page, stats: dict[str, int], stellen: int,
+                 start_indices: list[int] = None):
+    unprocessed_urls = []
+    unprocessed_indices = []
+
+    if start_indices is None:
+        start_indices = list(range(len(detail_urls)))
+
     print(f"{ts()} Download {len(detail_urls)} Reisen")
-    for i, url in enumerate(detail_urls):
-        success = process_single_trip(page, url, i, count, stellen, stats)
+    for i, (url, orig_i) in enumerate(zip(detail_urls, start_indices)):
+        success = process_single_trip(page, url, orig_i, count, stellen, stats)
         if not success:
-            unprocessed.append(url)
-            print(f"{ts()}   ⚠️  Verarbeite {len(unprocessed)} später {url}...")
-    return unprocessed
+            unprocessed_urls.append(url)
+            unprocessed_indices.append(orig_i)  # orig_i merken, nicht i
+            print(f"{ts()}   ??  Verarbeite später: {url}...")
+
+    return unprocessed_urls, unprocessed_indices
 
 if __name__ == "__main__":
     run_download()
